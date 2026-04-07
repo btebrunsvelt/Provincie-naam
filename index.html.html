@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Bebouwing & Marktpositie per provincie</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; padding: 1.5rem; background: #f8fafc; color: #111; }
+  h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #555; margin-bottom: 14px; }
+  .label { font-size: 11px; font-weight: 700; color: #e3000b; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px; }
+  .modes { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .mode-btn { padding: 6px 14px; border-radius: 20px; border: 1.5px solid #ddd; background: #fff; color: #444; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .mode-btn.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+  .layout { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  #sidebar { flex: 0 0 150px; }
+  .leg-title { font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+  .leg-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; font-size: 11px; color: #333; }
+  .leg-swatch { width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(0,0,0,.15); flex-shrink: 0; }
+  .avg-box { margin-top: 8px; padding: 6px 8px; background: #f8fafc; border-radius: 6px; font-size: 11px; color: #555; border: 1px solid #e2e8f0; }
+  .rank-title { font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; margin-top: 14px; border-top: 1px solid #eee; padding-top: 10px; }
+  .rank-row { display: flex; align-items: center; gap: 5px; padding: 3px 4px; border-radius: 3px; cursor: pointer; margin-bottom: 1px; }
+  .rank-row:hover, .rank-row.active { background: #f0f4ff; }
+  .rank-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; border: 1px solid rgba(0,0,0,.1); }
+  .rank-name { font-size: 10px; color: #444; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-val { font-size: 10px; font-weight: 700; }
+  #map-col { flex: 1 1 280px; min-width: 240px; }
+  #map-svg { display: block; background: #eef2f7; border-radius: 8px; border: 1px solid #e5e7eb; width: 100%; }
+  #status { font-size: 13px; color: #888; padding: 8px 0; }
+  #info { margin-top: 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 14px; display: none; }
+  .info-title { font-size: 15px; font-weight: 700; margin-bottom: 10px; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .card { border-radius: 6px; padding: 8px; }
+  .card-label { font-size: 9px; font-weight: 700; text-transform: uppercase; margin-bottom: 3px; }
+  .card-val { font-size: 18px; font-weight: 800; }
+  .card-sub { font-size: 10px; color: #555; }
+  .stats { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; font-size: 12px; }
+  .stats span:nth-child(odd) { color: #666; }
+  .stats span:nth-child(even) { font-weight: 600; }
+  .bar-wrap { margin-top: 8px; background: #f1f5f9; border-radius: 4px; height: 6px; position: relative; }
+  .bar-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #94a3b8; border-radius: 1px; }
+  .bar-fill { position: absolute; height: 6px; border-radius: 4px; }
+  .bar-labels { display: flex; justify-content: space-between; font-size: 10px; color: #94a3b8; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<div class="label">CBS + Eigen data</div>
+<h2>Bebouwing, Nieuwbouw &amp; Marktpositie</h2>
+<p class="sub" id="avg-sub"></p>
+
+<div class="modes">
+  <button class="mode-btn" data-mode="beb">Bebouwingsdichtheid</button>
+  <button class="mode-btn active" data-mode="markt">Jouw marktpositie</button>
+  <button class="mode-btn" data-mode="bouw">Nieuwbouw per inwoner</button>
+</div>
+
+<div class="layout">
+  <div id="sidebar">
+    <div class="leg-title" id="leg-title"></div>
+    <div id="legend"></div>
+    <div class="avg-box" id="avg-box" style="display:none"></div>
+    <div class="rank-title">Ranglijst</div>
+    <div id="ranking"></div>
+  </div>
+  <div id="map-col">
+    <div id="status">Kaart laden...</div>
+    <svg id="map-svg" viewBox="0 0 380 460"></svg>
+    <div id="info">
+      <div class="info-title" id="info-title"></div>
+      <div class="cards" id="info-cards"></div>
+      <div class="stats" id="info-stats"></div>
+      <div class="bar-wrap"><div class="bar-mid"></div><div class="bar-fill" id="bar-fill"></div></div>
+      <div class="bar-labels"><span>onder gemiddelde</span><span>boven gemiddelde</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+var PROV = {
+  "Groningen":     {beb:{pct:8,opp:2960},  bouw:{nieuw:2400,per100k:155},  omzet:61288.25},
+  "Friesland":     {beb:{pct:6,opp:3341},  bouw:{nieuw:2100,per100k:143},  omzet:40820.83},
+  "Drenthe":       {beb:{pct:7,opp:2680},  bouw:{nieuw:945,per100k:155},   omzet:63856.45},
+  "Overijssel":    {beb:{pct:11,opp:3421}, bouw:{nieuw:4800,per100k:205},  omzet:190288.44},
+  "Flevoland":     {beb:{pct:8,opp:1418},  bouw:{nieuw:1329,per100k:316},  omzet:19855.00},
+  "Gelderland":    {beb:{pct:10,opp:5136}, bouw:{nieuw:8200,per100k:238},  omzet:323265.20},
+  "Utrecht":       {beb:{pct:20,opp:1449}, bouw:{nieuw:7500,per100k:572},  omzet:396292.77},
+  "Noord-Holland": {beb:{pct:17,opp:2671}, bouw:{nieuw:16700,per100k:558}, omzet:737683.07},
+  "Zuid-Holland":  {beb:{pct:23,opp:2818}, bouw:{nieuw:17900,per100k:495}, omzet:1773690.69},
+  "Zeeland":       {beb:{pct:8,opp:1784},  bouw:{nieuw:1500,per100k:183},  omzet:367684.00},
+  "Noord-Brabant": {beb:{pct:14,opp:5082}, bouw:{nieuw:12500,per100k:402}, omzet:1466531.37},
+  "Limburg":       {beb:{pct:14,opp:2209}, bouw:{nieuw:2800,per100k:139},  omzet:227371.90}
+};
+
+var totalOmzet = Object.values(PROV).reduce(function(s,d){return s+d.omzet;},0);
+var totalNieuw = Object.values(PROV).reduce(function(s,d){return s+d.bouw.nieuw;},0);
+var NL_GEM = totalOmzet / totalNieuw;
+
+Object.keys(PROV).forEach(function(k){
+  PROV[k].perWoning  = PROV[k].omzet / PROV[k].bouw.nieuw;
+  PROV[k].indexVsGem = PROV[k].perWoning / NL_GEM;
+});
+
+document.getElementById("avg-sub").textContent = "Landelijk gemiddelde omzet per nieuwbouwwoning: " + fmt(NL_GEM);
+
+var NUTS2 = {"NL11":"Groningen","NL12":"Friesland","NL13":"Drenthe","NL21":"Overijssel","NL22":"Gelderland","NL23":"Flevoland","NL31":"Utrecht","NL32":"Noord-Holland","NL33":"Zuid-Holland","NL34":"Zeeland","NL41":"Noord-Brabant","NL42":"Limburg"};
+var SHORT = {"Noord-Holland":"N-Holland","Zuid-Holland":"Z-Holland","Noord-Brabant":"N-Brabant"};
+
+var BEB_STEPS   = [{max:7,c:"#eff6ff",l:"t/m 6%"},{max:9,c:"#bfdbfe",l:"7-8%"},{max:11,c:"#93c5fd",l:"9-10%"},{max:13,c:"#60a5fa",l:"11-12%"},{max:15,c:"#3b82f6",l:"13-14%"},{max:18,c:"#2563eb",l:"15-17%"},{max:22,c:"#1d4ed8",l:"18-21%"},{max:99,c:"#1e3a8a",l:"22%+"}];
+var BOUW_STEPS  = [{max:160,c:"#f0fdf4",l:"t/m 150"},{max:200,c:"#bbf7d0",l:"150-200"},{max:250,c:"#4ade80",l:"200-250"},{max:350,c:"#16a34a",l:"250-350"},{max:450,c:"#166534",l:"350-450"},{max:999,c:"#052e16",l:"450+"}];
+var MARKT_STEPS = [{max:0.3,c:"#7f1d1d",l:"<30% gem."},{max:0.5,c:"#dc2626",l:"30-50%"},{max:0.75,c:"#f87171",l:"50-75%"},{max:0.95,c:"#fca5a5",l:"75-95%"},{max:1.1,c:"#d1fae5",l:"95-110%"},{max:1.5,c:"#34d399",l:"110-150%"},{max:2.5,c:"#059669",l:"150-250%"},{max:99,c:"#064e3b",l:"250%+"}];
+
+function getSteps(mode){ return mode==="beb"?BEB_STEPS:mode==="bouw"?BOUW_STEPS:MARKT_STEPS; }
+function getColor(name, mode){
+  var d=PROV[name]; if(!d) return "#ccc";
+  var val = mode==="beb"?d.beb.pct:mode==="bouw"?d.bouw.per100k:d.indexVsGem;
+  var steps=getSteps(mode);
+  for(var i=0;i<steps.length;i++) if(val<steps[i].max) return steps[i].c;
+  return steps[steps.length-1].c;
+}
+function fmt(n){ return "€"+Math.round(n).toLocaleString("nl-NL"); }
+function fmtPct(n){ return (n>=1?"+":"")+Math.round((n-1)*100)+"%"; }
+
+var mode = "markt";
+var selectedProv = null;
+var pathEls = {};
+
+function buildLegend(){
+  var steps=getSteps(mode);
+  var titles={"beb":"% bebouwd terrein","bouw":"Won. per 100k inwoners","markt":"Omzet vs. markt"};
+  document.getElementById("leg-title").textContent = titles[mode];
+  var el=document.getElementById("legend"); el.innerHTML="";
+  steps.forEach(function(s){
+    el.innerHTML += '<div class="leg-item"><span class="leg-swatch" style="background:'+s.c+'"></span>'+s.l+'</div>';
+  });
+  var ab=document.getElementById("avg-box");
+  if(mode==="markt"){ ab.style.display="block"; ab.textContent="Gem. = "+fmt(NL_GEM)+" per woning"; }
+  else ab.style.display="none";
+}
+
+function buildRanking(){
+  var names=Object.keys(PROV).sort(function(a,b){
+    var va=mode==="beb"?PROV[a].beb.pct:mode==="bouw"?PROV[a].bouw.per100k:PROV[a].indexVsGem;
+    var vb=mode==="beb"?PROV[b].beb.pct:mode==="bouw"?PROV[b].bouw.per100k:PROV[b].indexVsGem;
+    return va-vb;
+  });
+  var el=document.getElementById("ranking"); el.innerHTML="";
+  names.forEach(function(name){
+    var d=PROV[name];
+    var val=mode==="beb"?d.beb.pct+"%":mode==="bouw"?d.bouw.per100k:fmtPct(d.indexVsGem);
+    var col=getColor(name,mode);
+    var isUnder=mode==="markt"&&d.indexVsGem<1;
+    var row=document.createElement("div");
+    row.className="rank-row"; row.id="rank-"+name.replace(/\W/g,"");
+    row.innerHTML='<span class="rank-dot" style="background:'+col+'"></span><span class="rank-name">'+name+'</span><span class="rank-val" style="color:'+(mode==="markt"?(isUnder?"#dc2626":"#059669"):"#111")+'">'+val+'</span>';
+    row.onmouseenter=function(){showInfo(name);hlPath(name,true);};
+    row.onmouseleave=function(){if(selectedProv!==name){clearInfo();hlPath(name,false);}};
+    row.onclick=function(){toggleSelect(name);};
+    el.appendChild(row);
+  });
+}
+
+function showInfo(name){
+  var d=PROV[name];
+  document.getElementById("info").style.display="block";
+  document.getElementById("info-title").textContent=name;
+  document.getElementById("info-cards").innerHTML=
+    '<div class="card" style="background:#eff6ff"><div class="card-label" style="color:#1d4ed8">Bebouwing</div><div class="card-val" style="color:#1e3a8a">'+d.beb.pct+'%</div><div class="card-sub">landoppervlak</div></div>'+
+    '<div class="card" style="background:#f0fdf4"><div class="card-label" style="color:#16a34a">Nieuwbouw</div><div class="card-val" style="color:#052e16">'+d.bouw.nieuw.toLocaleString("nl-NL")+'</div><div class="card-sub">woningen/jaar</div></div>'+
+    '<div class="card" style="background:'+(d.indexVsGem>=1?"#f0fdf4":"#fef2f2")+'"><div class="card-label" style="color:'+(d.indexVsGem>=1?"#059669":"#dc2626")+'">Markt</div><div class="card-val" style="color:'+(d.indexVsGem>=1?"#064e3b":"#7f1d1d")+'">'+fmtPct(d.indexVsGem)+'</div><div class="card-sub">vs. gemiddelde</div></div>';
+  document.getElementById("info-stats").innerHTML=
+    '<span>Jouw omzet</span><span>'+fmt(d.omzet)+'</span>'+
+    '<span>Omzet per woning</span><span>'+fmt(d.perWoning)+'</span>'+
+    '<span>Landelijk gem.</span><span>'+fmt(NL_GEM)+'</span>';
+  var bf=document.getElementById("bar-fill");
+  var w=Math.min(50,Math.abs(d.indexVsGem-1)*50);
+  bf.style.background=d.indexVsGem>=1?"#059669":"#dc2626";
+  bf.style.left=d.indexVsGem>=1?"50%":Math.max(0,(d.indexVsGem/2)*100)+"%";
+  bf.style.width=w+"%";
+  document.querySelectorAll(".rank-row").forEach(function(r){r.classList.remove("active");});
+  var rr=document.getElementById("rank-"+name.replace(/\W/g,""));
+  if(rr) rr.classList.add("active");
+}
+
+function clearInfo(){
+  if(selectedProv) return;
+  document.getElementById("info").style.display="none";
+  document.querySelectorAll(".rank-row").forEach(function(r){r.classList.remove("active");});
+}
+
+function toggleSelect(name){
+  if(selectedProv===name){ selectedProv=null; hlPath(name,false); clearInfo(); }
+  else { if(selectedProv) hlPath(selectedProv,false); selectedProv=name; hlPath(name,true); showInfo(name); }
+}
+
+function hlPath(name, on){
+  var p=pathEls[name]; if(!p) return;
+  var base=getColor(name,mode);
+  p.setAttribute("stroke", on?"#111":"#fff");
+  p.setAttribute("stroke-width", on?"2":"0.8");
+  if(on){ var c=d3.color(base); p.setAttribute("fill",c?c.darker(0.35).toString():base); }
+  else p.setAttribute("fill", base);
+}
+
+function updateColors(){
+  Object.keys(pathEls).forEach(function(name){
+    pathEls[name].setAttribute("fill", getColor(name,mode));
+  });
+  buildLegend(); buildRanking();
+}
+
+// Mode buttons
+document.querySelectorAll(".mode-btn").forEach(function(btn){
+  btn.addEventListener("click", function(){
+    document.querySelectorAll(".mode-btn").forEach(function(b){b.classList.remove("active");});
+    btn.classList.add("active");
+    mode=btn.dataset.mode;
+    updateColors();
+    if(selectedProv) showInfo(selectedProv);
+  });
+});
+
+// Draw map
+var svg=d3.select("#map-svg");
+var W=380,H=460;
+
+var tryUrls = [
+  "https://cdn.jsdelivr.net/npm/nuts-topojson@1.0.0/nuts2.topojson",
+  "https://cdn.jsdelivr.net/npm/@highcharts/map-collection@2.0.0/countries/nl/nl-all.topo.json"
+];
+
+function tryLoad(i){
+  if(i>=tryUrls.length){ document.getElementById("status").textContent="Kaart kon niet geladen worden."; return; }
+  d3.json(tryUrls[i]).then(function(topo){
+    var key=Object.keys(topo.objects)[0];
+    var all=topojson.feature(topo,topo.objects[key]).features;
+    var getName;
+    if(i===0){
+      getName=function(f){var id=f.properties.NUTS_ID||f.id||""; return NUTS2[id]||"";};
+    } else {
+      var nm={"North Holland":"Noord-Holland","South Holland":"Zuid-Holland","North Brabant":"Noord-Brabant"};
+      getName=function(f){var n=f.properties.name||""; return nm[n]||n;};
+    }
+    var named=all.filter(function(f){return !!PROV[getName(f)];});
+    if(!named.length){tryLoad(i+1);return;}
+    var proj=d3.geoMercator().fitSize([W,H],{type:"FeatureCollection",features:named});
+    var path=d3.geoPath(proj);
+    document.getElementById("status").style.display="none";
+    named.forEach(function(f){
+      var name=getName(f);
+      var g=svg.append("g");
+      var p=g.append("path").datum(f).attr("d",path)
+        .attr("fill",getColor(name,mode))
+        .attr("stroke","#fff").attr("stroke-width","0.8")
+        .style("cursor","pointer");
+      pathEls[name]=p.node();
+      p.on("mouseover",function(){showInfo(name);hlPath(name,true);})
+       .on("mouseout", function(){if(selectedProv!==name){clearInfo();hlPath(name,false);}})
+       .on("click",    function(){toggleSelect(name);});
+      var c=path.centroid(f);
+      if(!isNaN(c[0])){
+        g.append("text").attr("x",c[0]).attr("y",c[1])
+          .attr("text-anchor","middle").attr("dominant-baseline","middle")
+          .attr("font-size","7.5").attr("font-weight","700")
+          .attr("fill","#fff").attr("stroke","rgba(0,0,0,.4)").attr("stroke-width",".3")
+          .style("pointer-events","none")
+          .text(SHORT[name]||name);
+      }
+    });
+  }).catch(function(){tryLoad(i+1);});
+}
+
+buildLegend(); buildRanking();
+tryLoad(0);
+</script>
+</body>
+</html>
